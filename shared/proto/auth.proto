@@ -1,0 +1,33 @@
+
+syntax = "proto3";
+
+package auth;
+
+service AuthService {
+  rpc VerifyToken (VerifyTokenRequest)
+      returns (VerifyTokenResponse);
+
+  rpc GetUser (GetUserRequest)
+      returns (GetUserResponse);
+}
+
+message VerifyTokenRequest {
+  string token = 1;
+}
+
+message VerifyTokenResponse {
+  bool valid = 1;
+  int32 userId = 2;
+  string username = 3;
+  string message = 4;
+}
+
+message GetUserRequest {
+  int32 userId = 1;
+}
+
+message GetUserResponse {
+  int32 userId = 1;
+  string username = 2;
+  bool found = 3;
+}
