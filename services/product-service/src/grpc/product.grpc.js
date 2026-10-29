@@ -10,21 +10,18 @@ const PROTO_PATH = path.join(
     "../../../../shared/proto/product.proto"
 );
 
-const packageDefinition = protoLoader.loadSync(
-    PROTO_PATH,
-    {
-        keepCase: true,
-        longs: String,
-        enums: String,
-        defaults: true,
-        oneofs: true
-    }
-);
+const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
+    keepCase: true,
+    longs: String,
+    enums: String,
+    defaults: true,
+    oneofs: true
+});
 
-const productProto = grpc.loadPackageDefinition(
-    packageDefinition
-).product;
+const productProto =
+    grpc.loadPackageDefinition(packageDefinition).product;
 
+// Lay thong tin san pham
 const getProduct = async (call, callback) => {
     try {
         const product = await Product.findOne({
@@ -52,6 +49,7 @@ const getProduct = async (call, callback) => {
     }
 };
 
+// Lay danh sach san pham
 const listProducts = async (call, callback) => {
     try {
         const products = await Product.find();
@@ -72,7 +70,7 @@ const listProducts = async (call, callback) => {
     }
 };
 
-
+// Gan so luong ton kho moi
 const updateStock = async (call, callback) => {
     try {
         const { pid, quantity } = call.request;
@@ -85,8 +83,8 @@ const updateStock = async (call, callback) => {
         }
 
         const product = await Product.findOneAndUpdate(
-            { pid: pid },
-            { $set: { quantity: quantity } },
+            { pid },
+            { $set: { quantity } },
             { new: true, runValidators: true }
         );
 
@@ -111,7 +109,109 @@ const updateStock = async (call, callback) => {
     }
 };
 
+// Tru ton kho khi dat hang
+const reserveStock = async (call, callback) => {
+    try {
+        const { pid, quantity } = call.request;
 
+        if (
+            !Number.isInteger(pid) ||
+            pid <= 0 ||
+            !Number.isInteger(quantity) ||
+            quantity <= 0
+        ) {
+            return callback({
+                code: grpc.status.INVALID_ARGUMENT,
+                message: "Invalid product ID or quantity"
+            });
+        }
+
+        const product = await Product.findOneAndUpdate(
+            {
+                pid,
+                quantity: { $gte: quantity }
+            },
+            {
+                $inc: { quantity: -quantity }
+            },
+            {
+                new: true,
+                runValidators: true
+            }
+        );
+
+        if (!product) {
+            const existingProduct = await Product.findOne({ pid });
+
+            return callback({
+                code: existingProduct
+                    ? grpc.status.FAILED_PRECONDITION
+                    : grpc.status.NOT_FOUND,
+                message: existingProduct
+                    ? "Insufficient stock"
+                    : "Product not found"
+            });
+        }
+
+        callback(null, {
+            pid: product.pid,
+            pname: product.pname,
+            price: product.price,
+            quantity: product.quantity
+        });
+    } catch (error) {
+        callback({
+            code: grpc.status.INTERNAL,
+            message: error.message
+        });
+    }
+};
+
+// Hoan tra ton kho neu dat hang that bai
+const releaseStock = async (call, callback) => {
+    try {
+        const { pid, quantity } = call.request;
+
+        if (
+            !Number.isInteger(pid) ||
+            pid <= 0 ||
+            !Number.isInteger(quantity) ||
+            quantity <= 0
+        ) {
+            return callback({
+                code: grpc.status.INVALID_ARGUMENT,
+                message: "Invalid product ID or quantity"
+            });
+        }
+
+        const product = await Product.findOneAndUpdate(
+            { pid },
+            { $inc: { quantity } },
+            { new: true, runValidators: true }
+        );
+
+        if (!product) {
+            return callback({
+                code: grpc.status.NOT_FOUND,
+                message: "Product not found"
+            });
+        }
+
+        callback(null, {
+            pid: product.pid,
+            pname: product.pname,
+            price: product.price,
+            quantity: product.quantity
+        });
+    } catch (error) {
+        callback({
+            code: grpc.status.INTERNAL,
+            message: error.message
+        });
+    }
+};
+
+// Khoi dong gRPC Server
 const startGrpcServer = () => {
     const server = new grpc.Server();
 
@@ -120,7 +220,9 @@ const startGrpcServer = () => {
         {
             GetProduct: getProduct,
             ListProducts: listProducts,
-            UpdateStock: updateStock
+            UpdateStock: updateStock,
+            ReserveStock: reserveStock,
+            ReleaseStock: releaseStock
         }
     );
 

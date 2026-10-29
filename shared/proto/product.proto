@@ -12,6 +12,12 @@ service ProductService {
 
   rpc UpdateStock (UpdateStockRequest)
       returns (ProductResponse);
+
+  rpc ReserveStock (ReserveStockRequest)
+      returns (ProductResponse);
+
+  rpc ReleaseStock (ReleaseStockRequest)
+      returns (ProductResponse);
 }
 
 message Empty {}
@@ -21,6 +27,16 @@ message GetProductRequest {
 }
 
 message UpdateStockRequest {
+  int32 pid = 1;
+  int32 quantity = 2;
+}
+
+message ReserveStockRequest {
+  int32 pid = 1;
+  int32 quantity = 2;
+}
+
+message ReleaseStockRequest {
   int32 pid = 1;
   int32 quantity = 2;
 }
