@@ -1,0 +1,29 @@
+
+syntax = "proto3";
+
+package customer;
+
+service CustomerService {
+  rpc GetCustomer (GetCustomerRequest) returns (CustomerResponse);
+  rpc AddPoints (AddPointsRequest) returns (CustomerResponse);
+}
+
+message GetCustomerRequest {
+  int32 userId = 1;
+}
+
+message AddPointsRequest {
+  int32 userId = 1;
+  int32 points = 2;
+}
+
+message CustomerResponse {
+  bool found = 1;
+  int32 userId = 2;
+  string fullname = 3;
+  string email = 4;
+  string phone = 5;
+  int32 points = 6;
+  string membershipName = 7;
+  string message = 8;
+}
