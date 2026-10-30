@@ -1,5 +1,77 @@
-﻿services:
+﻿name: ecommerce-microservices
+
+services:
+  auth-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: authuser
+      POSTGRES_PASSWORD: ${AUTH_POSTGRES_PASSWORD:?Missing AUTH_POSTGRES_PASSWORD}
+      POSTGRES_DB: auth_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - auth_postgres_data:/var/lib/postgresql/data
+    networks:
+      - prompt3-network
+    restart: unless-stopped
+
+  customer-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: customeruser
+      POSTGRES_PASSWORD: ${CUSTOMER_POSTGRES_PASSWORD:?Missing CUSTOMER_POSTGRES_PASSWORD}
+      POSTGRES_DB: customer_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - customer_postgres_data:/var/lib/postgresql/data
+    networks:
+      - prompt3-network
+    restart: unless-stopped
+
+  product-db:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - product_mongo_data:/data/db
+      - product_mongo_config_data:/data/configdb
+    networks:
+      - prompt3-network
+    restart: unless-stopped
+
+  order-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: orderuser
+      POSTGRES_PASSWORD: ${ORDER_POSTGRES_PASSWORD:?Missing ORDER_POSTGRES_PASSWORD}
+      POSTGRES_DB: order_db
+    ports:
+      - "5435:5432"
+    volumes:
+      - order_postgres_data:/var/lib/postgresql/data
+    networks:
+      - prompt3-network
+    restart: unless-stopped
+
+  shipment-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: shipmentuser
+      POSTGRES_PASSWORD: ${SHIPMENT_POSTGRES_PASSWORD:?Missing SHIPMENT_POSTGRES_PASSWORD}
+      POSTGRES_DB: shipment_db
+    ports:
+      - "5436:5432"
+    volumes:
+      - shipment_postgres_data:/var/lib/postgresql/data
+    networks:
+      - prompt3-network
+    restart: unless-stopped
+
   auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
     image: prompt3-auth-service:latest
     env_file:
       - ./services/auth-service/.env
@@ -10,10 +82,16 @@
     ports:
       - "3001:3001"
       - "50051:50051"
+    depends_on:
+      - auth-db
+      - kafka
     networks:
       - prompt3-network
 
   customer-service:
+    build:
+      context: .
+      dockerfile: services/customer-service/Dockerfile
     image: prompt3-customer-service:latest
     env_file:
       - ./services/customer-service/.env
@@ -24,10 +102,16 @@
     ports:
       - "3002:3002"
       - "50052:50052"
+    depends_on:
+      - customer-db
+      - kafka
     networks:
       - prompt3-network
 
   product-service:
+    build:
+      context: .
+      dockerfile: services/product-service/Dockerfile
     image: prompt3-product-service:latest
     env_file:
       - ./services/product-service/.env
@@ -36,10 +120,15 @@
     ports:
       - "3003:3003"
       - "50053:50053"
+    depends_on:
+      - product-db
     networks:
       - prompt3-network
 
   order-service:
+    build:
+      context: .
+      dockerfile: services/order-service/Dockerfile
     image: prompt3-order-service:latest
     env_file:
       - ./services/order-service/.env
@@ -53,12 +142,18 @@
     ports:
       - "3004:3004"
     depends_on:
+      - order-db
       - product-service
+      - customer-service
       - shipment-service
+      - kafka
     networks:
       - prompt3-network
 
   shipment-service:
+    build:
+      context: .
+      dockerfile: services/shipment-service/Dockerfile
     image: prompt3-shipment-service:latest
     env_file:
       - ./services/shipment-service/.env
@@ -69,10 +164,16 @@
     ports:
       - "3005:3005"
       - "50055:50055"
+    depends_on:
+      - shipment-db
+      - kafka
     networks:
       - prompt3-network
 
   api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
     image: prompt3-api-gateway:latest
     env_file:
       - ./api-gateway/.env
@@ -118,6 +219,30 @@
 
 volumes:
   kafka_data:
+
+  auth_postgres_data:
+    external: true
+    name: auth_postgres_data
+
+  customer_postgres_data:
+    external: true
+    name: customer_postgres_data
+
+  order_postgres_data:
+    external: true
+    name: order_postgres_data
+
+  shipment_postgres_data:
+    external: true
+    name: shipment_postgres_data
+
+  product_mongo_data:
+    external: true
+    name: product_mongo_data
+
+  product_mongo_config_data:
+    external: true
+    name: 71feed39771e17acaaef4d7f11936b9626d2f8140d2e812ef8d429467a80b4b0
 
 networks:
   prompt3-network:
