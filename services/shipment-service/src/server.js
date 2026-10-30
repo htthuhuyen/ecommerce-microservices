@@ -5,6 +5,7 @@ const express = require("express");
 const { pool, connectDB } = require("./config/db");
 const shipmentRoutes = require("./routes/shipment.routes");
 const { startGrpcServer } = require("./grpc/shipment.grpc");
+const { startKafkaConsumer } = require("./kafka/consumer");
 
 const app = express();
 
@@ -34,10 +35,12 @@ app.get("/health", async (req, res) => {
 // Shipment REST APIs
 app.use("/api/shipments", shipmentRoutes);
 
-// Start HTTP and gRPC servers
+// Start HTTP, gRPC and Kafka Consumer
 const startServer = async () => {
     try {
         await connectDB();
+
+        await startKafkaConsumer();
 
         app.listen(PORT, () => {
             console.log(

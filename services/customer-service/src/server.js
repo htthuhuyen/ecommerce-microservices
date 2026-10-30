@@ -1,8 +1,10 @@
 
 require("dotenv").config();
-const { startGrpcServer } = require("./grpc/customer.grpc");
+
 const express = require("express");
 const { connectDB, pool } = require("./config/db");
+const { startGrpcServer } = require("./grpc/customer.grpc");
+const { startKafkaConsumer } = require("./kafka/consumer");
 const customerRoutes = require("./routes/customer.routes");
 
 const app = express();
@@ -35,12 +37,21 @@ const startServer = async () => {
     try {
         await connectDB();
 
+        await startKafkaConsumer();
+
         app.listen(PORT, () => {
-            console.log(`Customer Service running on port ${PORT}`);
+            console.log(
+                `Customer Service running on port ${PORT}`
+            );
+
             startGrpcServer();
         });
     } catch (error) {
-        console.error("Failed to start Customer Service:", error.message);
+        console.error(
+            "Failed to start Customer Service:",
+            error.message
+        );
+
         process.exit(1);
     }
 };

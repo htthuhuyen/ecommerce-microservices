@@ -2,8 +2,9 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { pool } = require("../config/db");
+const { publishUserRegistered } = require("../kafka/producer");
 
-// Đăng ký tài khoản
+// Register a new user
 const register = async (req, res) => {
     try {
         const { username, password } = req.body;
@@ -36,14 +37,26 @@ const register = async (req, res) => {
 
         const result = await pool.query(
             `INSERT INTO users (username, password_hash)
-       VALUES ($1, $2)
-       RETURNING id, username, created_at`,
+             VALUES ($1, $2)
+             RETURNING id, username, created_at`,
             [normalizedUsername, passwordHash]
         );
 
-        res.status(201).json({
+        const user = result.rows[0];
+
+        // Publish event after saving the user
+        try {
+            await publishUserRegistered(user);
+        } catch (kafkaError) {
+            console.error(
+                "Failed to publish user-registered:",
+                kafkaError.message
+            );
+        }
+
+        return res.status(201).json({
             message: "User registered successfully",
-            user: result.rows[0]
+            user
         });
     } catch (error) {
         if (error.code === "23505") {
@@ -54,13 +67,13 @@ const register = async (req, res) => {
 
         console.error("Register error:", error.message);
 
-        res.status(500).json({
+        return res.status(500).json({
             message: "Registration failed"
         });
     }
 };
 
-
+// Login
 const login = async (req, res) => {
     try {
         const { username, password } = req.body;
@@ -132,5 +145,3 @@ module.exports = {
     register,
     login
 };
-
-

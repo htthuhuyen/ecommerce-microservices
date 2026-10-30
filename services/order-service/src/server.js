@@ -3,6 +3,7 @@ require("dotenv").config();
 
 const express = require("express");
 const { connectDB, pool } = require("./config/db");
+const { connectKafka } = require("./kafka/producer");
 const orderRoutes = require("./routes/order.routes");
 
 const app = express();
@@ -37,11 +38,19 @@ const startServer = async () => {
     try {
         await connectDB();
 
+        await connectKafka();
+
         app.listen(PORT, () => {
-            console.log(`Order Service running on port ${PORT}`);
+            console.log(
+                `Order Service running on port ${PORT}`
+            );
         });
     } catch (error) {
-        console.error("Failed to start Order Service:", error.message);
+        console.error(
+            "Failed to start Order Service:",
+            error.message
+        );
+
         process.exit(1);
     }
 };

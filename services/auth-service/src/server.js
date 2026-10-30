@@ -5,14 +5,14 @@ const express = require("express");
 const { pool, connectDB } = require("./config/db");
 const authRoutes = require("./routes/auth.routes");
 const { startGrpcServer } = require("./grpc/auth.grpc");
+const { connectKafka } = require("./kafka/producer");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Cho phép nhận dữ liệu JSON
 app.use(express.json());
 
-// Healthcheck
+// Health check
 app.get("/health", async (req, res) => {
     try {
         await pool.query("SELECT 1");
@@ -31,13 +31,16 @@ app.get("/health", async (req, res) => {
     }
 });
 
-// Auth Routes
+// Auth routes
 app.use("/api/auth", authRoutes);
 
-// Khởi động HTTP và gRPC Server
+// Start HTTP, gRPC and Kafka
 const startServer = async () => {
     try {
         await connectDB();
+
+        // Connect Kafka Producer
+        await connectKafka();
 
         app.listen(PORT, () => {
             console.log(`Auth Service running on port ${PORT}`);
@@ -45,7 +48,10 @@ const startServer = async () => {
 
         startGrpcServer();
     } catch (error) {
-        console.error("Failed to start Auth Service:", error.message);
+        console.error(
+            "Failed to start Auth Service:",
+            error.message
+        );
         process.exit(1);
     }
 };

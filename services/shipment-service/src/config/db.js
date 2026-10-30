@@ -17,7 +17,10 @@ const connectDB = async () => {
 
         client.release();
     } catch (error) {
-        console.error("PostgreSQL connection error:", error.message);
+        console.error(
+            "PostgreSQL connection error:",
+            error.message
+        );
         throw error;
     }
 };

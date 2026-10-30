@@ -1,14 +1,17 @@
 
 const { pool } = require("../config/db");
 const productClient = require("../grpc/product.client");
+const customerClient = require("../grpc/customer.client");
+const { publishOrderCreated } = require("../kafka/producer");
 
-// Goi Product Service qua gRPC
-const callProductGrpc = (method, data) => {
+// Goi gRPC va nhan ket qua
+const callGrpc = (grpcClient, method, data) => {
     return new Promise((resolve, reject) => {
-        productClient[method](data, (error, response) => {
+        grpcClient[method](data, (error, response) => {
             if (error) {
                 return reject(error);
             }
+
             resolve(response);
         });
     });
@@ -16,7 +19,7 @@ const callProductGrpc = (method, data) => {
 
 // Tao don hang
 const createOrder = async (req, res) => {
-    const { user_id, product_id, quantity } = req.body;
+    const { user_id, product_id, quantity, address } = req.body;
 
     if (
         !Number.isInteger(user_id) ||
@@ -24,7 +27,9 @@ const createOrder = async (req, res) => {
         !Number.isInteger(product_id) ||
         product_id <= 0 ||
         !Number.isInteger(quantity) ||
-        quantity <= 0
+        quantity <= 0 ||
+        typeof address !== "string" ||
+        !address.trim()
     ) {
         return res.status(400).json({
             message: "Invalid order information"
@@ -34,12 +39,29 @@ const createOrder = async (req, res) => {
     let client;
     let reserved = false;
     let transactionStarted = false;
+    let orderCommitted = false;
+    let order;
 
     try {
-        // Lay thong tin san pham
-        const product = await callProductGrpc("GetProduct", {
-            pid: product_id
-        });
+        // Lay thong tin khach hang bang gRPC
+        const customer = await callGrpc(
+            customerClient,
+            "GetCustomer",
+            { userId: user_id }
+        );
+
+        if (!customer.found) {
+            return res.status(404).json({
+                message: "Customer not found"
+            });
+        }
+
+        // Lay thong tin san pham bang gRPC
+        const product = await callGrpc(
+            productClient,
+            "GetProduct",
+            { pid: product_id }
+        );
 
         if (!Number.isFinite(product.price) || product.price < 0) {
             return res.status(400).json({
@@ -47,15 +69,32 @@ const createOrder = async (req, res) => {
             });
         }
 
+        // Tinh gia va giam gia thanh vien GOLD
+        const originalAmount = product.price * quantity;
+
+        const membershipName =
+            (customer.membershipName || "").toUpperCase();
+
+        const discountRate =
+            membershipName === "GOLD" ? 0.10 : 0;
+
+        const discountAmount =
+            Math.round(originalAmount * discountRate);
+
+        const totalAmount =
+            originalAmount - discountAmount;
+
         // Tru ton kho
-        await callProductGrpc("ReserveStock", {
-            pid: product_id,
-            quantity
-        });
+        await callGrpc(
+            productClient,
+            "ReserveStock",
+            {
+                pid: product_id,
+                quantity
+            }
+        );
 
         reserved = true;
-
-        const totalAmount = product.price * quantity;
 
         client = await pool.connect();
 
@@ -65,49 +104,59 @@ const createOrder = async (req, res) => {
         // Luu don hang
         const orderResult = await client.query(
             `INSERT INTO orders (user_id, total_amount, status)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
+             VALUES ($1, $2, $3)
+             RETURNING *`,
             [user_id, totalAmount, "PENDING"]
         );
 
-        const order = orderResult.rows[0];
+        order = orderResult.rows[0];
 
         // Luu chi tiet don hang
         await client.query(
             `INSERT INTO order_details
-       (order_id, product_id, quantity, unit_price, subtotal)
-       VALUES ($1, $2, $3, $4, $5)`,
+             (order_id, product_id, quantity, unit_price, subtotal)
+             VALUES ($1, $2, $3, $4, $5)`,
             [
                 order.id,
                 product_id,
                 quantity,
                 product.price,
-                totalAmount
+                originalAmount
             ]
         );
 
         await client.query("COMMIT");
         transactionStarted = false;
+        orderCommitted = true;
 
-        return res.status(201).json({
-            message: "Order created successfully",
-            order
-        });
+        // Bo sung thong tin giam gia vao ket qua
+        order.membership_name = membershipName;
+        order.original_amount = originalAmount;
+        order.discount_rate = discountRate;
+        order.discount_amount = discountAmount;
+
     } catch (error) {
         if (client && transactionStarted) {
             try {
                 await client.query("ROLLBACK");
             } catch (rollbackError) {
-                console.error("Rollback error:", rollbackError.message);
+                console.error(
+                    "Rollback error:",
+                    rollbackError.message
+                );
             }
         }
 
-        if (reserved) {
+        if (reserved && !orderCommitted) {
             try {
-                await callProductGrpc("ReleaseStock", {
-                    pid: product_id,
-                    quantity
-                });
+                await callGrpc(
+                    productClient,
+                    "ReleaseStock",
+                    {
+                        pid: product_id,
+                        quantity
+                    }
+                );
             } catch (releaseError) {
                 console.error(
                     "Stock compensation failed:",
@@ -115,7 +164,8 @@ const createOrder = async (req, res) => {
                 );
 
                 return res.status(500).json({
-                    message: "Order failed and stock recovery needs attention"
+                    message:
+                        "Order failed and stock recovery needs attention"
                 });
             }
         }
@@ -137,10 +187,44 @@ const createOrder = async (req, res) => {
         return res.status(500).json({
             message: "Failed to create order"
         });
+
     } finally {
         if (client) {
             client.release();
         }
+    }
+
+    // Don hang da luu, gui su kien qua Kafka
+    try {
+        await publishOrderCreated({
+            order_id: order.id,
+            user_id,
+            product_id,
+            quantity,
+            total_amount: order.total_amount,
+            address: address.trim(),
+            created_at: order.created_at
+        });
+
+        return res.status(201).json({
+            message: "Order created and Kafka event published",
+            order,
+            shipment_status: "PENDING"
+        });
+
+    } catch (error) {
+        console.error(
+            "Publish order-created event failed:",
+            error.message
+        );
+
+        // Khong hoan ton kho vi don hang da luu
+        return res.status(201).json({
+            message:
+                "Order created but Kafka publishing needs attention",
+            order,
+            shipment_status: "NEEDS_ATTENTION"
+        });
     }
 };
 
@@ -191,6 +275,7 @@ const getOrderById = async (req, res) => {
             ...orderResult.rows[0],
             details: detailsResult.rows
         });
+
     } catch (error) {
         res.status(500).json({
             message: "Failed to get order",
